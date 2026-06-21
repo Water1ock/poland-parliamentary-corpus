@@ -132,16 +132,24 @@ def api_get_html(url: str) -> str:
     """GET a Sejm API endpoint that returns HTML (transcript text).
 
     Returns empty string on failure or if the response is not HTML."""
+    # Override Accept header — transcript endpoints return text/html
+    headers = {"Accept": "text/html, application/json, */*"}
     for attempt in range(MAX_RETRIES):
         try:
-            resp = session.get(url, timeout=60)
+            resp = session.get(url, timeout=60, headers=headers)
             if resp.status_code == 200:
                 ct = resp.headers.get("Content-Type", "")
                 if "html" not in ct and "text/plain" not in ct:
                     log.warning("Unexpected Content-Type %r for %s", ct, url)
                     return ""
+                # Detect WAF / error pages masquerading as 200
+                text = resp.text
+                if "requested URL was rejected" in text.lower():
+                    log.warning("WAF rejection for %s — retrying...", url[:80])
+                    time.sleep(BACKOFF_FACTOR ** attempt)
+                    continue
                 resp.encoding = "utf-8"
-                return resp.text
+                return text
             elif resp.status_code == 404:
                 log.warning("404 Not Found (HTML): %s", url)
                 return ""
@@ -299,8 +307,9 @@ def scrape_sitting(
             speaker = stmt.get("name", "")
             function = stmt.get("function", "")
 
-            # Determine chair status
-            is_chair = 1 if CHAIR_PATTERN.search(function) else 0
+            # Determine chair status — check both function field and speaker name
+            is_chair = 1 if (CHAIR_PATTERN.search(function)
+                             or CHAIR_PATTERN.search(speaker)) else 0
             display_speaker = "Marszałek" if is_chair else speaker
 
             # Fetch full speech text
