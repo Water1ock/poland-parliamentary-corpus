@@ -11,17 +11,27 @@ Usage:
     python scraper.py --sitting 1              # Scrape a single sitting
     python scraper.py --sitting 1 --date 2023-11-13  # Scrape a single day
     python scraper.py --limit 5                # Scrape only first 5 sittings
+    python scraper.py --resume                 # Resume from last checkpoint
+    python scraper.py --force                  # Ignore checkpoint, start fresh
+
+Checkpointing:
+    After each sitting completes, a checkpoint file is saved atomically.
+    If the scraper is interrupted (Ctrl+C, crash, network loss), re-run
+    with --resume to pick up where it left off.  The output CSV is written
+    incrementally so already-scraped sittings are preserved.
 """
 
 import argparse
 import csv
 import html
+import json
 import logging
 import os
 import re
 import sys
+import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import requests
@@ -239,6 +249,97 @@ def parse_speech_html(html_content: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Checkpointing
+# ---------------------------------------------------------------------------
+
+def _checkpoint_path(output_file: str) -> str:
+    """Derive checkpoint filename from output CSV filename."""
+    return output_file + ".checkpoint.json"
+
+
+def save_checkpoint(
+    output_file: str,
+    completed_sittings: list[int],
+    stats: dict[str, int],
+    csv_safe_size: int = 0,
+) -> None:
+    """Atomically write a checkpoint file.
+
+    Uses a temp file + os.replace for atomicity — no risk of a corrupted
+    checkpoint from a mid-write crash.
+
+    ``csv_safe_size`` records the byte size of the output CSV after the last
+    *fully* completed sitting.  On resume, any bytes beyond this offset are
+    truncated to prevent duplicate rows from a previously interrupted sitting.
+    """
+    cp_path = _checkpoint_path(output_file)
+    payload = {
+        "output_file": output_file,
+        "completed_sittings": sorted(completed_sittings),
+        "csv_safe_size": csv_safe_size,
+        "stats": dict(stats),
+        "last_updated": datetime.now(timezone.utc).isoformat(),
+    }
+    out_dir = os.path.dirname(cp_path) or "."
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", prefix=".checkpoint-",
+            delete=False, encoding="utf-8", dir=out_dir,
+        ) as fh:
+            json.dump(payload, fh, indent=2, ensure_ascii=False)
+            tmp_path = fh.name
+        os.replace(tmp_path, cp_path)
+        log.debug("Checkpoint saved: %d sitting(s) complete", len(completed_sittings))
+    except OSError as exc:
+        log.warning("Failed to write checkpoint: %s", exc)
+
+
+def load_checkpoint(output_file: str) -> Optional[dict]:
+    """Load a checkpoint file if it exists and matches the output file.
+
+    Returns None when:
+    - No checkpoint file exists
+    - Checkpoint is corrupt (invalid JSON)
+    - Checkpoint references a different output file
+    - Output CSV was deleted but checkpoint survived (auto-cleans checkpoint)
+    """
+    cp_path = _checkpoint_path(output_file)
+    if not os.path.exists(cp_path):
+        return None
+    try:
+        with open(cp_path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (json.JSONDecodeError, OSError) as exc:
+        log.warning("Checkpoint file corrupt (%s) — ignoring", exc)
+        return None
+    if not isinstance(data, dict) or data.get("output_file") != output_file:
+        log.info("Checkpoint is for a different output file — ignoring")
+        return None
+    if not isinstance(data.get("completed_sittings"), list):
+        log.warning("Checkpoint missing completed_sittings — ignoring")
+        return None
+    # Guard: CSV was deleted but checkpoint survived → auto-clean
+    if not os.path.exists(output_file) and data.get("completed_sittings"):
+        log.warning(
+            "Output CSV %r is missing but checkpoint lists %d completed sitting(s). "
+            "Deleting stale checkpoint.",
+            output_file, len(data["completed_sittings"]),
+        )
+        delete_checkpoint(output_file)
+        return None
+    return data
+
+
+def delete_checkpoint(output_file: str) -> None:
+    """Remove the checkpoint file so the next run starts fresh."""
+    cp_path = _checkpoint_path(output_file)
+    try:
+        os.remove(cp_path)
+    except FileNotFoundError:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Core scraping logic
 # ---------------------------------------------------------------------------
 
@@ -392,7 +493,29 @@ def main():
         "--dry-run", action="store_true",
         help="Fetch sitting list but don't scrape speeches",
     )
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="Resume from last checkpoint (auto-loads checkpoint)",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Ignore any existing checkpoint and start fresh",
+    )
     args = parser.parse_args()
+
+    # --- Handle checkpoint ---
+    if args.force:
+        delete_checkpoint(args.output)
+        log.info("Forced fresh start — checkpoint deleted")
+
+    checkpoint = None
+    if args.resume:
+        checkpoint = load_checkpoint(args.output)
+        if checkpoint:
+            completed = checkpoint.get("completed_sittings", [])
+            log.info("Checkpoint loaded: %d sitting(s) already complete", len(completed))
+        else:
+            log.info("No checkpoint found — starting fresh")
 
     # --- Fetch sitting list ---
     all_sittings = fetch_proceedings(TERM)
@@ -419,7 +542,15 @@ def main():
 
     if args.dry_run:
         for s in sittings:
-            print(f"  Sitting {s['number']}: {s.get('title','')[:100]}")
+            title = s.get('title', '')
+            # Encode-decode through the terminal's encoding to survive
+            # Windows consoles that can't render Polish diacritics.
+            try:
+                print(f"  Sitting {s['number']}: {title[:100]}")
+            except UnicodeEncodeError:
+                print(f"  Sitting {s['number']}: {title[:100]}".encode(
+                    sys.stdout.encoding or 'utf-8', errors='replace').decode(
+                    sys.stdout.encoding or 'utf-8', errors='replace'))
             print(f"    Dates: {', '.join(s.get('dates',[]))}")
         log.info("Dry run complete — no data fetched")
         return
@@ -430,6 +561,19 @@ def main():
     est_minutes = est_speeches * (DELAY_BETWEEN_SPEECHES + 0.2) / 60
     log.info("Estimated ~%d speeches, ~%.0f minutes", est_speeches, est_minutes)
 
+    # --- Truncate CSV on resume to remove partial sitting data ---
+    csv_safe_size = checkpoint.get("csv_safe_size", 0) if checkpoint else 0
+    if csv_safe_size > 0 and os.path.exists(args.output):
+        current_size = os.path.getsize(args.output)
+        if current_size > csv_safe_size:
+            log.warning(
+                "CSV has %d extra bytes beyond safe offset (%d → %d). "
+                "Truncating to remove partial data from interrupted sitting.",
+                current_size - csv_safe_size, csv_safe_size, current_size,
+            )
+            with open(args.output, "r+b") as fh:
+                fh.truncate(csv_safe_size)
+
     # --- Open CSV ---
     file_exists = os.path.exists(args.output) and os.path.getsize(args.output) > 0
     write_header = not args.no_header and not file_exists
@@ -439,17 +583,35 @@ def main():
         if write_header:
             writer.writeheader()
 
-        stats = {
-            "speeches_written": 0,
-            "speeches_failed": 0,
-            "unspoken_included": 0,
-            "days_skipped": 0,
-        }
+        # After writing the header (if fresh file), record the safe size.
+        # On the very first run, csv_safe_size starts at the header offset.
+        # Use os.path.getsize() rather than f.tell() — text-mode tell()
+        # returns an opaque number, not a guaranteed byte offset.
+        if write_header and csv_safe_size == 0:
+            f.flush()
+            csv_safe_size = os.path.getsize(args.output)
+
+        # Accumulate stats from checkpoint if resuming
+        stats = dict(checkpoint.get("stats", {})) if checkpoint else {}
+        stats.setdefault("speeches_written", 0)
+        stats.setdefault("speeches_failed", 0)
+        stats.setdefault("unspoken_included", 0)
+        stats.setdefault("days_skipped", 0)
+
+        completed_sittings = (
+            list(checkpoint.get("completed_sittings", [])) if checkpoint else []
+        )
 
         start_time = time.time()
 
         for sitting_data in sittings:
             sitting_num = sitting_data["number"]
+
+            # Skip already-completed sittings when resuming
+            if sitting_num in completed_sittings:
+                log.info("Skipping sitting %d (already in checkpoint)", sitting_num)
+                continue
+
             dates = sitting_data.get("dates", [])
 
             if not dates:
@@ -457,6 +619,15 @@ def main():
                 continue
 
             scrape_sitting(sitting_num, dates, writer, stats)
+            f.flush()  # ensure rows are on disk before we measure size
+
+            # Checkpoint after every sitting so we never lose more than
+            # one sitting's worth of progress on a crash.  We also record
+            # the current CSV size so the next resume can truncate any
+            # partially-written sitting.
+            completed_sittings.append(sitting_num)
+            csv_safe_size = os.path.getsize(args.output)
+            save_checkpoint(args.output, completed_sittings, stats, csv_safe_size)
 
         elapsed = time.time() - start_time
         log.info("=" * 60)
@@ -466,6 +637,16 @@ def main():
         log.info("  Unspoken included: %d", stats["unspoken_included"])
         log.info("  Days skipped:      %d", stats["days_skipped"])
         log.info("Output: %s", args.output)
+
+        # Only delete checkpoint when ALL API sittings are complete.
+        # Partial runs (--sitting, --limit) must preserve it for the
+        # next --resume to continue from where we left off.
+        if len(completed_sittings) >= len(all_sittings):
+            delete_checkpoint(args.output)
+            log.info("All %d sittings complete — checkpoint deleted", len(all_sittings))
+        else:
+            log.info("Partial run (%d/%d sittings) — checkpoint preserved for next --resume",
+                     len(completed_sittings), len(all_sittings))
 
 
 if __name__ == "__main__":
