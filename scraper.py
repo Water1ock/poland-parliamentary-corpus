@@ -295,10 +295,11 @@ def scrape_sitting(
         running_order = 0
 
         for stmt in statements:
-            # Skip "unspoken" entries (procedural notes, not actual speeches)
+            # Unspoken entries are formal written statements (oświadczenia)
+            # — they contain real speech text and SHOULD be included.
+            # We track them in stats for transparency but do not skip.
             if stmt.get("unspoken", False):
-                stats["unspoken_skipped"] += 1
-                continue
+                stats["unspoken_included"] += 1
 
             # Increment running order BEFORE fetch so numbering stays
             # sequential even if an individual speech fetch fails
@@ -441,7 +442,7 @@ def main():
         stats = {
             "speeches_written": 0,
             "speeches_failed": 0,
-            "unspoken_skipped": 0,
+            "unspoken_included": 0,
             "days_skipped": 0,
         }
 
@@ -462,7 +463,7 @@ def main():
         log.info("SCRAPE COMPLETE in %.1f minutes", elapsed / 60)
         log.info("  Speeches written:  %d", stats["speeches_written"])
         log.info("  Speeches failed:   %d", stats["speeches_failed"])
-        log.info("  Unspoken skipped:  %d", stats["unspoken_skipped"])
+        log.info("  Unspoken included: %d", stats["unspoken_included"])
         log.info("  Days skipped:      %d", stats["days_skipped"])
         log.info("Output: %s", args.output)
 
