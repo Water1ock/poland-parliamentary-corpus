@@ -7,3 +7,13 @@ scraper.log
 
 # Test outputs
 test_*.csv
+
+# PPC data (ZIP files and extracted TEI directories)
+*.zip
+ppc_*/
+
+# Generated CSV data files (too large for GitHub)
+PL_speeches_*.csv
+
+# Do NOT ignore the original ParlText dataset if copied in
+!PL_speeches.csv

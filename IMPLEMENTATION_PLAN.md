@@ -226,3 +226,140 @@ The transcript HTML from `/transcripts/{id}` typically contains:
 - Sejm API docs: [api.sejm.gov.pl/sejm/openapi/ui](https://api.sejm.gov.pl/sejm/openapi/ui/)
 - Sebők, M., Molnár, C., & Takács, A. (2025). "Levelling up quantitative legislative studies on Central-Eastern Europe: Introducing the ParlText CEE Database." *Intersections: East European Journal of Society and Politics.*
 - Comparative Agendas Project: [comparativeagendas.net](https://comparativeagendas.net/pages/master-codebook)
+
+---
+
+# Extension: Polish Senat (Upper House) — 11th Term
+
+## 9. Rationale
+
+ParlText CEE covers only the lower chambers (or unicameral legislatures) by design. The Polish Senate was excluded for cross-country comparability, not because data was unavailable. This extension fills that documented gap.
+
+## 10. Data Source: Polish Parliamentary Corpus (PPC)
+
+The Polish Senate does not provide a public API equivalent to `api.sejm.gov.pl`. Instead, Senate stenographic records are sourced from the **[Polish Parliamentary Corpus](https://clip.ipipan.waw.pl/PPC)** (Ogrodniczuk et al., IPI PAN), which provides Senate plenary data in **TEI P5 XML** format.
+
+**Download**: [https://kdp.ipipan.waw.pl/static/ppcdump-tei/2023-2027-tei.zip](https://kdp.ipipan.waw.pl/static/ppcdump-tei/2023-2027-tei.zip)
+
+**PPC data structure**:
+```
+2023-2027/senat/posiedzenia/pp/
+├── 202327-snt-ppxxx-00001-01/    # Sitting 1, Day 1
+│   ├── header.xml                # Metadata + speaker list
+│   ├── text_structure.xml        # Speech utterances (TEI)
+│   └── anno.ccl.gz              # Linguistic annotations (not used)
+└── ...
+```
+
+**License**: Parliamentary data is public domain; PPC annotations are CC-BY.
+
+## 11. TEI → ParlText Mapping
+
+| ParlText Column | PPC TEI Source | Notes |
+|---|---|---|
+| `speech_id` | Constructed: `PL_S_{date}_{counter}` | Per-date running order |
+| `link` | Constructed Senat URL | Sitting-level page (no per-speech URLs exist) |
+| `agenda_item` | `"9999"` | Placeholder |
+| `electoral_cycle` | `"2023-2027"` | From term 11 |
+| `speechnumber` | Running counter | Resets per date |
+| `speaker` | `<persName>` via `who` reference | Standardized to `"Marszałek"` for chair |
+| `chair` | `<roleName>` match | `1` for `Marszałek`, `Wicemarszałek`, `Marszałek Senior` |
+| `date` | `<date>` in header.xml | ISO format |
+| `speech_text` | `<u>` element text content | Procedural `#komentarz` utterances filtered out |
+| `bill_id` | `"9999"` | Placeholder |
+| `prediction` | `999` | Placeholder |
+| `prediction_name` | `"No Policy Content"` | Placeholder |
+
+### 11.1 Chair Detection
+
+Unlike the Sejm scraper (which uses a broad `Marszałek` substring match), the Senate converter uses exact-set matching against `{"Marszałek", "Wicemarszałek", "Marszałek Senior"}`. This correctly excludes:
+- `Marszałek Sejmu RP` (visiting Sejm Marshal — not presiding over the Senate)
+- `Marszałek Województwa Śląskiego` (regional voivodeship marshal)
+
+### 11.2 Procedural Filtering
+
+The PPC tags procedural/stage-direction notes as `<u who="#komentarz">`. These are filtered out:
+- `(Oklaski)` — applause
+- `(Głos z sali)` — interjections from the floor
+- `(Poruszenie na sali)` — commotion
+- `(Wszyscy wstają)` — everyone rises
+- Opening/closing ceremony markers
+
+### 11.3 Speaker Resolution
+
+Speaker IDs in `<u who="#AndrzejDuda">` are cross-referenced against the `<person>` list in `header.xml` to resolve human-readable names and roles.
+
+## 12. Converter Architecture
+
+**Script**: `convert_ppc_senate_to_parltext.py`
+
+```
+1. Iterate sitting subdirectories (sorted)
+2. For each sitting:
+   a. Parse header.xml → date, sitting#, speaker list with roles
+   b. Parse text_structure.xml → list of <u> utterances
+   c. Filter out who="#komentarz"
+   d. For each remaining utterance:
+      - Resolve speaker name and chair status
+      - Generate speech_id (per-date counter)
+      - Write CSV row
+3. Validate: check for duplicate speech_ids
+```
+
+**Usage**:
+```bash
+python convert_ppc_senate_to_parltext.py           # Full conversion
+python convert_ppc_senate_to_parltext.py --dry-run # Preview only
+```
+
+## 13. Actual Results
+
+### Combined (All Terms)
+
+| Metric | Value |
+|--------|-------|
+| **Total speeches** | 443,854 |
+| **Terms covered** | 3 (9th, 10th, 11th) |
+| **Date range** | 2015-11-12 to 2025-04-24 |
+| **Output** | `PL_speeches_senat_all.csv` (192 MB, with `house` column) |
+
+### By Term
+
+| Term | Electoral Cycle | Speeches | Days | Speakers | Chair % | Date Range |
+|------|-----------------|----------|------|----------|---------|------------|
+| 9th | 2015–2019 | 221,112 | 204 | 322 | 43.4% | 2015-11-12 to 2019-10-18 |
+| 10th | 2019–2023 | 186,450 | 147 | 392 | 37.0% | 2019-11-12 to 2023-09-07 |
+| 11th | 2023–2027 | 36,292 | 53 | 225 | 47.5% | 2023-11-13 to 2025-04-24 |
+
+**Note on chair percentage**: The Senate chair percentage (37–48%) is dramatically higher than the Sejm (0.4%) because:
+- Senate sessions are smaller (100 senators vs. 460 deputies)
+- The presiding officer (Marszałek Senatu / Wicemarszałek Senatu) manages nearly every procedural transition
+- Each speaker introduction, agenda item transition, and vote call is a separate utterance
+- This is a structural feature of Senate proceedings, consistent with the PPC's utterance segmentation
+
+## 14. Multi-Term Support
+
+The converter auto-detects the electoral cycle and Senate term number from the input directory path (e.g., `2015-2019/senat/posiedzenia/pp` → cycle `"2015-2019"`, Senate term 9). This allows the same converter script to process any PPC term without manual configuration.
+
+**Supported term mapping**:
+```
+1989-1991 → Senate 1st term    2007-2011 → Senate 7th term
+1991-1993 → Senate 2nd term    2011-2015 → Senate 8th term
+1993-1997 → Senate 3rd term    2015-2019 → Senate 9th term
+1997-2001 → Senate 4th term    2019-2023 → Senate 10th term
+2001-2005 → Senate 5th term    2023-2027 → Senate 11th term
+2005-2007 → Senate 6th term
+```
+
+> PPC also contains pre-WWII Senate data (1922–1939, terms 1–5). These terms are not yet mapped in the converter but could be added.
+
+## 15. Limitations
+
+| Aspect | Status | Rationale |
+|--------|--------|-----------|
+| `agenda_item` | `"9999"` | Not available in PPC TEI data |
+| `bill_id` | `"9999"` | Bill linkage requires separate database |
+| `prediction` / `prediction_name` | Placeholders | CAP topic coding not yet implemented |
+| **Data source** | Dependent on PPC updates | Not real-time scraping; relies on PPC release cadence |
+| **Per-speech URLs** | Not available | Senate website provides only sitting-level pages, not per-speech links |
+| **Date recency** | 2025-04-24 cutoff | PPC data may lag behind live Senate sessions |
