@@ -1,6 +1,6 @@
 # Poland Parliamentary Corpus
 
-Extending the [ParlText CEE](https://parltext.org/repository/) dataset of Polish parliamentary speeches to cover **both chambers** (Sejm and Senat) from 2023 onwards.
+Extending the [ParlText CEE](https://parltext.org/repository/) dataset of Polish parliamentary speeches to cover **both chambers** (Sejm and Senat) from 1991 onwards.
 
 ## Background
 
@@ -8,7 +8,35 @@ The ParlText CEE project compiled a comprehensive database of parliamentary spee
 
 This repository extends the dataset in two dimensions:
 1. **Sejm 2023+**: 34,602 speeches from the 10th term, scraped via the official [Sejm REST API](https://api.sejm.gov.pl)
-2. **Senat 2023+**: 36,292 speeches from the 11th term, converted from the [Polish Parliamentary Corpus](https://clip.ipipan.waw.pl/PPC) (PPC) TEI XML data (Ogrodniczuk et al.)
+2. **Senat 2015+**: 443,854 speeches from the 9th, 10th, and 11th terms (and expanding), converted from the [Polish Parliamentary Corpus](https://clip.ipipan.waw.pl/PPC) (PPC) TEI XML data (Ogrodniczuk et al.)
+
+## Obtaining the Base Dataset (`PL_speeches.csv`)
+
+The original ParlText CEE Polish speech corpus is **not included in this repository** due to its size (1.3 GB, 717,809 rows). It must be obtained separately from the official source:
+
+| Detail | Value |
+|--------|-------|
+| **File** | `PL_speeches.csv` |
+| **Download** | [Harvard Dataverse — ParlText CEE](https://dataverse.harvard.edu/dataverse/parltext) |
+| **License** | CC BY-NC 4.0 (Attribution-NonCommercial) |
+| **Direct download** | `PL_speeches.csv` is listed under the Poland section of the Dataverse repository |
+| **Codebook** | The `codebook_ParlText_PL_speeches.pdf` file in this repository documents the schema |
+| **Coverage** | Sejm (lower house only): 1991-11-25 to 2023-08-30, 1st–9th terms |
+| **Size** | ~1.3 GB, 717,809 speeches |
+
+**How the datasets fit together:**
+
+```
+PL_speeches.csv                     ← ParlText CEE base (Sejm 1991–2023), from Harvard Dataverse
+    +
+PL_speeches_2023_onwards.csv        ← Our Sejm extension (2023–2026), from Sejm API
+    +
+PL_speeches_senat_all.csv           ← Our Senat addition (2015–2025), from PPC TEI
+    =
+Complete bicameral Polish corpus (1991–2025)
+```
+
+Place `PL_speeches.csv` in this directory alongside the other CSV files to create the full dataset. All files share the same 12-column schema (the Senat file adds a `house` column to distinguish chambers).
 
 ## Repository Structure
 
@@ -18,10 +46,15 @@ poland-parliamentary-corpus/
 ├── IMPLEMENTATION_PLAN.md             # Detailed methodology and implementation plan
 ├── scraper.py                         # Python scraper for the Sejm API
 ├── convert_ppc_senate_to_parltext.py  # PPC Senate TEI → ParlText CSV converter
-├── .gitignore                         # Ignores build artifacts, logs, checkpoints
+├── requirements.txt                   # Python dependencies
+├── .gitignore                         # Ignores ZIPs, extracted data, generated CSVs
+│
+├── PL_speeches.csv                    # ★ Obtain from Harvard Dataverse (not in repo)
 ├── PL_speeches_2023_onwards.csv       # Output: Sejm 2023+ dataset
-├── PL_speeches_senat_2023_onwards.csv # Output: Senat 2023+ dataset
-└── codebook_ParlText_PL_speeches.pdf  # Original codebook (source data in parent dir)
+├── PL_speeches_senat_*.csv            # Output: Senat term datasets (2015+)
+├── PL_speeches_senat_all.csv          # Output: All Senat terms merged (with house col)
+│
+└── codebook_ParlText_PL_speeches.pdf  # Original ParlText codebook
 ```
 
 ## Final Dataset Statistics
