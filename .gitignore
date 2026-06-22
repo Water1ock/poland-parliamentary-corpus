@@ -1,0 +1,9 @@
+# Python cache
+__pycache__/
+
+# Scraper artifacts
+scraper.log
+*.checkpoint.json
+
+# Test outputs
+test_*.csv
