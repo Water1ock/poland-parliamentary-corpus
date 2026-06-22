@@ -46,10 +46,12 @@ GET /sejm/term{term}/proceedings/{sitting}/{date}/transcripts/{id}
 
 **Critical**: The `/transcripts` list endpoint returns only metadata (speaker, timestamps). The actual speech text must be fetched one-by-one via `/transcripts/{id}`.
 
+**Critical: WAF Protection**: The Sejm API gateway blocks requests with `Accept: application/json` on the individual transcript endpoint (which returns `text/html`). The scraper must override the session `Accept` header to `text/html, */*` before fetching individual transcripts.
+
 ### 3.3 Term Coverage via API
 
 - **Term 9**: `GET /sejm/term9/proceedings` → 81 sittings (all already in PL_speeches.csv)
-- **Term 10**: `GET /sejm/term10/proceedings` → currently ~75 sittings (ongoing)
+- **Term 10**: `GET /sejm/term10/proceedings` → 61 sittings (scraped)
 
 ## 4. Scraper Architecture
 
@@ -152,32 +154,60 @@ The transcript HTML from `/transcripts/{id}` typically contains:
 ## 6. Step-by-Step Implementation
 
 ### Step 1: Verify API Access
-- [ ] Confirm all three endpoint tiers work for term 10
-- [ ] Verify transcript HTML structure for term 10
-- [ ] Test URL construction for `link` field
+- [x] Confirm all three endpoint tiers work for term 10
+- [x] Verify transcript HTML structure for term 10
+- [x] Test URL construction for `link` field
 
 ### Step 2: Build Core Scraper (`scraper.py`)
-- [ ] `fetch_proceedings(term)` — get sitting list
-- [ ] `fetch_transcripts_list(sitting, date)` — get statement metadata
-- [ ] `fetch_speech_html(sitting, date, speech_id)` — get individual speech
-- [ ] `parse_speech_html(html)` — extract clean speech text
-- [ ] `build_csv_row(...)` — assemble all fields
+- [x] `fetch_proceedings(term)` — get sitting list
+- [x] `fetch_transcripts_list(sitting, date)` — get statement metadata
+- [x] `fetch_speech_html(sitting, date, speech_id)` — get individual speech
+- [x] `parse_speech_html(html)` — extract clean speech text
+- [x] `build_csv_row(...)` — assemble all fields
+- [x] Checkpoint/resume support with CSV truncation
 
 ### Step 3: Run for 10th Term
-- [ ] Iterate all sittings from proceeding 1 onwards
-- [ ] For each sitting day, fetch all speeches
-- [ ] Write incrementally to CSV (append mode)
+- [x] Iterate all sittings from proceeding 1 onwards
+- [x] For each sitting day, fetch all speeches
+- [x] Write incrementally to CSV (append mode)
+- [x] Handle "unspoken" entries (oświadczenia — written statements)
 
 ### Step 4: Validate Output
-- [ ] Verify row count, column count
-- [ ] Check no duplicate `speech_id` values
-- [ ] Spot-check speech content against live Sejm website
-- [ ] Compare format against `PL_speeches.csv` sample
+- [x] Verify row count, column count
+- [x] Check no duplicate `speech_id` values
+- [x] Spot-check speech content against live Sejm website
+- [x] Compare format against `PL_speeches.csv` sample
 
 ### Step 5: Document
-- [ ] Update README with usage instructions
-- [ ] Document any deviations from original methodology
-- [ ] Note placeholder values and future improvements
+- [x] Update README with usage instructions
+- [x] Document any deviations from original methodology
+- [x] Note placeholder values and future improvements
+
+## 7. Actual Results
+
+| Metric | Value |
+|--------|-------|
+| **Speeches** | 34,602 |
+| **Sittings** | 61 (sequential, no gaps) |
+| **Sitting days** | 152 |
+| **Date range** | 2023-11-13 to 2026-06-18 |
+| **Runtime** | 465 minutes (~7.75 hours) |
+| **Unique speakers** | 615 |
+| **Chair speeches** | 153 |
+| **Empty cells** | 0 |
+| **Duplicate IDs** | 0 |
+| **Speech length (mean)** | 2,426 chars |
+| **Speech length (median)** | 1,396 chars |
+| **Longest speech** | 133,993 chars |
+
+### Bugs Encountered & Fixed During Development
+
+| Bug | Impact | Solution |
+|-----|--------|----------|
+| WAF blocking (Accept header mismatch) | All speech texts were error pages | Override `Accept` to `text/html` on transcript endpoints |
+| Empty `function` field for chair speakers | Marszałek speeches had `chair=0` | Also check speaker name for "Marszałek" |
+| Skipping `unspoken` entries | ~370 written statements lost | Include unspoken entries (oświadczenia) |
+| `f.tell()` unreliable for byte offsets | CSV truncation on resume could be wrong | Use `os.path.getsize()` instead |
 
 ## 7. Limitations (Intentional)
 
