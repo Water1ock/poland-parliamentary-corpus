@@ -74,24 +74,29 @@ poland-parliamentary-corpus/
 | **Empty values** | 0 |
 | **Duplicate IDs** | 0 |
 
-### Senat (Upper House) — 9th, 10th & 11th Terms
+### Senat (Upper House) — Terms 1–11 (1989–2025)
 
 #### Combined
 
 | Metric | Count |
 |--------|-------|
-| **Total speeches** | 443,854 |
-| **Terms covered** | 3 (9th, 10th, 11th) |
-| **Date range** | 2015-11-12 to 2025-04-24 |
-| **File** | `PL_speeches_senat_all.csv` (192 MB) |
+| **Total speeches** | 909,742 |
+| **Terms covered** | 7 of 11 (1st–4th, 9th–11th) |
+| **Date range** | 1989-07-04 to 2025-04-24 |
+| **File** | `PL_speeches_senat_all.csv` (398 MB) |
 
 #### By Term
 
-| Term | Electoral Cycle | Speeches | Dates | Speakers | Chair % | File |
-|------|-----------------|----------|-------|----------|---------|------|
-| 9th | 2015–2019 | 221,112 | 204 | 322 | 43.4% | `PL_speeches_senat_2015_2019.csv` |
-| 10th | 2019–2023 | 186,450 | 147 | 392 | 37.0% | `PL_speeches_senat_2019_2023.csv` |
-| 11th | 2023–2027 | 36,292 | 53 | 225 | 47.5% | `PL_speeches_senat_2023_onwards.csv` |
+| Term | Electoral Cycle | Speeches | Dates | Chair % | File |
+|------|-----------------|----------|-------|---------|------|
+| 1st | 1989–1991 | 58,572 | 61 | 23.4% | `PL_speeches_senat_1989_1991.csv` |
+| 2nd | 1991–1993 | 50,666 | 59 | 29.3% | `PL_speeches_senat_1991_1993.csv` |
+| 3rd | 1993–1997 | 154,720 | 145 | 36.3% | `PL_speeches_senat_1993_1997.csv` |
+| 4th | 1997–2001 | 201,930 | 187 | — | `PL_speeches_senat_1997_2001.csv` |
+| 5th–8th | 2001–2015 | *pending* | — | — | — |
+| 9th | 2015–2019 | 221,112 | 204 | 43.4% | `PL_speeches_senat_2015_2019.csv` |
+| 10th | 2019–2023 | 186,450 | 147 | 37.0% | `PL_speeches_senat_2019_2023.csv` |
+| 11th | 2023–2027 | 36,292 | 53 | 47.5% | `PL_speeches_senat_2023_onwards.csv` |
 
 > **Note on chair percentage**: The Senat chair percentage (37–48%) is much higher than the Sejm (0.4%) because Senate plenary sessions are smaller (100 senators vs. 460 deputies) and the presiding officer (Marszałek Senatu / Wicemarszałek Senatu) manages nearly every speaker transition. This is a structural feature of the Senate, not a data artifact.
 
@@ -164,7 +169,7 @@ python convert_ppc_senate_to_parltext.py --input-dir path/to/ppc/data --output m
 - **CAP topic coding**: Set to `999` / `"No Policy Content"` (ML classifier not yet built)
 - **Senat source**: Dependent on PPC update cadence (not real-time scraping). Latest PPC data: 2025-04-24.
 - **Senat links**: Senate does not provide per-speech URLs; `link` field points to sitting-level page on senat.gov.pl.
-- **Pre-2015 Senat**: PPC has Senate data back to 1922 (and 1989–2015 for the reinstated Senate). Not yet converted — available for future expansion.
+- **Pre-2015 Senat**: 7 of 11 post-1989 Senate terms covered (1–4, 9–11). Terms 5–8 (2001–2015) are pending — PPC ZIPs available at `kdp.ipipan.waw.pl/static/ppcdump-tei/`.
 
 ## References
 

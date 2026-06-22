@@ -87,6 +87,26 @@ def _find_all_in(el, tag: str):
     return el.xpath(f".//*[local-name()='{tag}']")
 
 
+def _parse_xml(file_path: str):
+    """
+    Parse an XML file with encoding fallback.
+
+    Older PPC files may use Windows-1250 or ISO-8859-2 instead of UTF-8.
+    Tries UTF-8 first, then common Polish encodings.
+    """
+    # Encodings to try, in order
+    encodings = ['utf-8', 'windows-1250', 'iso-8859-2']
+    for enc in encodings:
+        try:
+            parser = etree.XMLParser(encoding=enc, recover=True)
+            return etree.parse(file_path, parser)
+        except (etree.XMLSyntaxError, UnicodeDecodeError):
+            continue
+    # Last resort: let lxml auto-detect
+    parser = etree.XMLParser(recover=True)
+    return etree.parse(file_path, parser)
+
+
 def parse_header(header_path: str) -> dict:
     """
     Parse a PPC header.xml file.
@@ -97,7 +117,7 @@ def parse_header(header_path: str) -> dict:
         day: int
         speakers: dict {xml_id: {"name": str, "role": str, "is_chair": bool}}
     """
-    tree = etree.parse(header_path)
+    tree = _parse_xml(header_path)
     root = tree.getroot()
 
     # --- Date and sitting metadata from sourceDesc ---
@@ -193,7 +213,7 @@ def parse_utterances(text_path: str) -> list[dict]:
     Each dict has: xml_id, who, text
     Excludes utterances with who="#komentarz".
     """
-    tree = etree.parse(text_path)
+    tree = _parse_xml(text_path)
     root = tree.getroot()
 
     utterances = []
